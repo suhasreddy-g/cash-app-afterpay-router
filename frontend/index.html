@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -20,7 +21,9 @@
       --radius: 12px;
     }
 
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
 
     body {
       margin: 0;
@@ -54,9 +57,15 @@
       margin: 0 0 24px;
     }
 
-    form { display: grid; gap: 16px; }
+    form {
+      display: grid;
+      gap: 16px;
+    }
 
-    .field { display: grid; gap: 6px; }
+    .field {
+      display: grid;
+      gap: 6px;
+    }
 
     label {
       font-size: 0.85rem;
@@ -101,8 +110,14 @@
       transition: transform 0.05s, opacity 0.15s, background 0.15s;
     }
 
-    button:active { transform: translateY(1px); }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    button:active {
+      transform: translateY(1px);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
 
     .btn-submit {
       padding: 14px;
@@ -110,7 +125,10 @@
       color: #fff;
       margin-top: 4px;
     }
-    .btn-submit:hover:not(:disabled) { background: var(--accent-hover); }
+
+    .btn-submit:hover:not(:disabled) {
+      background: var(--accent-hover);
+    }
 
     .spinner {
       display: inline-block;
@@ -123,7 +141,12 @@
       vertical-align: -3px;
       margin-right: 8px;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
 
     /* Status banners */
     .banner {
@@ -132,6 +155,7 @@
       font-size: 0.88rem;
       margin-top: 4px;
     }
+
     .banner.error {
       background: #fef3f2;
       color: var(--error);
@@ -146,10 +170,12 @@
       display: grid;
       gap: 12px;
     }
+
     .payment-options h2 {
       font-size: 1rem;
       margin: 0;
     }
+
     .payment-options .hint {
       color: var(--muted);
       font-size: 0.82rem;
@@ -161,23 +187,38 @@
       background: var(--cashapp);
       color: #fff;
     }
-    .btn-cashapp:hover { background: #00bd2d; }
+
+    .btn-cashapp:hover {
+      background: #00bd2d;
+    }
 
     .btn-afterpay {
       padding: 14px;
       background: var(--afterpay);
       color: var(--afterpay-ink);
     }
-    .btn-afterpay:hover { background: #9ff5d5; }
 
-    .hidden { display: none; }
+    .btn-afterpay:hover {
+      background: #9ff5d5;
+    }
+
+    .hidden {
+      display: none;
+    }
 
     @media (max-width: 480px) {
-      body { padding: 12px; }
-      .card { padding: 22px; box-shadow: none; }
+      body {
+        padding: 12px;
+      }
+
+      .card {
+        padding: 22px;
+        box-shadow: none;
+      }
     }
   </style>
 </head>
+
 <body>
   <main class="card">
     <h1>Checkout</h1>
@@ -217,7 +258,7 @@
 
   <script>
     // Change this for the deployed version (e.g. "https://api.yourdomain.com").
-    const API_BASE_URL = "http://localhost:8000";
+    const API_BASE_URL = "https://cash-app-afterpay-router.onrender.com";
     const API_URL = API_BASE_URL + "/api/checkout";
 
     const form = document.getElementById("checkout-form");
@@ -348,4 +389,5 @@
     });
   </script>
 </body>
+
 </html>
