@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Checkout — Payment Router</title>
+  <style>
+    :root {
+      --bg: #f4f5f7;
+      --card: #ffffff;
+      --ink: #1a1f36;
+      --muted: #6b7280;
+      --border: #e2e4e9;
+      --accent: #635bff;
+      --accent-hover: #5147e6;
+      --error: #d92d20;
+      --cashapp: #00d632;
+      --afterpay: #b2fce4;
+      --afterpay-ink: #0a0a23;
+      --radius: 12px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 440px;
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: 0 10px 40px rgba(26, 31, 54, 0.08);
+      padding: 32px;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      margin: 0 0 4px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin: 0 0 24px;
+    }
+
+    form { display: grid; gap: 16px; }
+
+    .field { display: grid; gap: 6px; }
+
+    label {
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px 14px;
+      font-size: 1rem;
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(99, 91, 255, 0.15);
+    }
+
+    input.invalid {
+      border-color: var(--error);
+      box-shadow: 0 0 0 3px rgba(217, 45, 32, 0.12);
+    }
+
+    .field-error {
+      color: var(--error);
+      font-size: 0.78rem;
+      min-height: 0;
+    }
+
+    button {
+      font-family: inherit;
+      cursor: pointer;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      transition: transform 0.05s, opacity 0.15s, background 0.15s;
+    }
+
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .btn-submit {
+      padding: 14px;
+      background: var(--accent);
+      color: #fff;
+      margin-top: 4px;
+    }
+    .btn-submit:hover:not(:disabled) { background: var(--accent-hover); }
+
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255, 255, 255, 0.45);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: -3px;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Status banners */
+    .banner {
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 0.88rem;
+      margin-top: 4px;
+    }
+    .banner.error {
+      background: #fef3f2;
+      color: var(--error);
+      border: 1px solid #fecdca;
+    }
+
+    /* Payment options */
+    .payment-options {
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      display: grid;
+      gap: 12px;
+    }
+    .payment-options h2 {
+      font-size: 1rem;
+      margin: 0;
+    }
+    .payment-options .hint {
+      color: var(--muted);
+      font-size: 0.82rem;
+      margin: -6px 0 4px;
+    }
+
+    .btn-cashapp {
+      padding: 14px;
+      background: var(--cashapp);
+      color: #fff;
+    }
+    .btn-cashapp:hover { background: #00bd2d; }
+
+    .btn-afterpay {
+      padding: 14px;
+      background: var(--afterpay);
+      color: var(--afterpay-ink);
+    }
+    .btn-afterpay:hover { background: #9ff5d5; }
+
+    .hidden { display: none; }
+
+    @media (max-width: 480px) {
+      body { padding: 12px; }
+      .card { padding: 22px; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Checkout</h1>
+    <p class="subtitle">Enter your order details to choose a payment method.</p>
+
+    <form id="checkout-form" novalidate>
+      <div class="field">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" placeholder="you@example.com" autocomplete="email" />
+        <span class="field-error" id="email-error"></span>
+      </div>
+
+      <div class="field">
+        <label for="itemName">Item Name</label>
+        <input type="text" id="itemName" name="itemName" placeholder="e.g. Wireless Headphones" />
+        <span class="field-error" id="itemName-error"></span>
+      </div>
+
+      <div class="field">
+        <label for="amount">Amount (USD)</label>
+        <input type="number" id="amount" name="amount" placeholder="0.00" step="0.01" min="0" inputmode="decimal" />
+        <span class="field-error" id="amount-error"></span>
+      </div>
+
+      <button type="submit" class="btn-submit" id="submit-btn">Continue to payment</button>
+    </form>
+
+    <div class="banner error hidden" id="api-error"></div>
+
+    <section class="payment-options hidden" id="payment-options" aria-live="polite">
+      <h2>Choose a payment method</h2>
+      <p class="hint" id="payment-hint"></p>
+      <button type="button" class="btn-cashapp hidden" id="cashapp-btn">Pay with Cash App Pay</button>
+      <button type="button" class="btn-afterpay hidden" id="afterpay-btn">Pay with Afterpay</button>
+    </section>
+  </main>
+
+  <script>
+    // Change this for the deployed version (e.g. "https://api.yourdomain.com").
+    const API_BASE_URL = "http://localhost:8000";
+    const API_URL = API_BASE_URL + "/api/checkout";
+
+    const form = document.getElementById("checkout-form");
+    const submitBtn = document.getElementById("submit-btn");
+    const apiError = document.getElementById("api-error");
+
+    const paymentOptions = document.getElementById("payment-options");
+    const paymentHint = document.getElementById("payment-hint");
+    const cashappBtn = document.getElementById("cashapp-btn");
+    const afterpayBtn = document.getElementById("afterpay-btn");
+
+    const fields = {
+      email: document.getElementById("email"),
+      itemName: document.getElementById("itemName"),
+      amount: document.getElementById("amount"),
+    };
+
+    const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+    function setFieldError(name, message) {
+      const input = fields[name];
+      const errorEl = document.getElementById(`${name}-error`);
+      errorEl.textContent = message || "";
+      input.classList.toggle("invalid", Boolean(message));
+    }
+
+    function clearErrors() {
+      Object.keys(fields).forEach((name) => setFieldError(name, ""));
+      apiError.classList.add("hidden");
+      apiError.textContent = "";
+    }
+
+    function validate() {
+      let valid = true;
+      const email = fields.email.value.trim();
+      const itemName = fields.itemName.value.trim();
+      const amount = parseFloat(fields.amount.value);
+
+      if (!EMAIL_RE.test(email)) {
+        setFieldError("email", "Enter a valid email address.");
+        valid = false;
+      }
+      if (!itemName) {
+        setFieldError("itemName", "Item name is required.");
+        valid = false;
+      }
+      if (!Number.isFinite(amount) || amount <= 0) {
+        setFieldError("amount", "Amount must be greater than 0.");
+        valid = false;
+      }
+
+      return valid ? { email, itemName, amount } : null;
+    }
+
+    function showPaymentOptions(amount) {
+      // Tier rules:
+      //   < $50      -> Cash App only
+      //   $50–$500   -> both
+      //   > $500     -> Afterpay only
+      const cashApp = amount <= 500;  // available below/at $500
+      const afterpay = amount >= 50;  // available at/above $50
+
+      cashappBtn.classList.toggle("hidden", !cashApp);
+      afterpayBtn.classList.toggle("hidden", !afterpay);
+
+      if (cashApp && afterpay) {
+        paymentHint.textContent = "Both Cash App Pay and Afterpay are available for this amount.";
+      } else if (cashApp) {
+        paymentHint.textContent = "Cash App Pay is available for this amount.";
+      } else {
+        paymentHint.textContent = "Afterpay is available for this amount.";
+      }
+
+      paymentOptions.classList.remove("hidden");
+    }
+
+    function setLoading(isLoading) {
+      submitBtn.disabled = isLoading;
+      submitBtn.innerHTML = isLoading
+        ? '<span class="spinner"></span>Processing…'
+        : "Continue to payment";
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      clearErrors();
+      paymentOptions.classList.add("hidden");
+
+      const data = validate();
+      if (!data) return;
+
+      setLoading(true);
+      try {
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+
+        if (!res.ok) {
+          let detail = `Request failed (HTTP ${res.status}).`;
+          try {
+            const body = await res.json();
+            if (body && body.detail) detail = typeof body.detail === "string" ? body.detail : detail;
+          } catch (_) { /* non-JSON response */ }
+          throw new Error(detail);
+        }
+
+        await res.json();
+        showPaymentOptions(data.amount);
+      } catch (err) {
+        const message =
+          err instanceof TypeError
+            ? `Could not reach the payment server. Make sure the backend is running on ${API_BASE_URL}.`
+            : err.message;
+        apiError.textContent = message;
+        apiError.classList.remove("hidden");
+      } finally {
+        setLoading(false);
+      }
+    });
+
+    cashappBtn.addEventListener("click", () => {
+      console.log("Payment method selected: Cash App Pay");
+    });
+    afterpayBtn.addEventListener("click", () => {
+      console.log("Payment method selected: Afterpay");
+    });
+  </script>
+</body>
+</html>
