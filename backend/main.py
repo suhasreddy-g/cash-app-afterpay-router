@@ -49,8 +49,10 @@ app = FastAPI(title="Cash App / Afterpay Payment Router")
 # Wildcard subdomains can't go in allow_origins (it does exact matches), so
 # Vercel/Render are matched via allow_origin_regex instead.
 ALLOWED_ORIGINS = [
-    "http://localhost:8080",
+    "https://cash-app-afterpay-router.vercel.app/",     # ← Add your Vercel URL
+    "https://cash-app-afterpay-router.onrender.com",   # ← Remove trailing slash
     "http://localhost:3000",
+    "http://localhost:8080",
 ]
 ALLOWED_ORIGIN_REGEX = r"https://([a-z0-9-]+\.)*(vercel\.app|onrender\.com)$"
 
