@@ -1,5 +1,9 @@
 """Payment router backend.
 
+Routes a checkout to Cash App Pay (via Square) and/or Afterpay based on the
+order amount, exposes the per-provider payment endpoints, receives provider
+webhooks, and serves the logged transaction history.
+
 Run with:
     uvicorn main:app --reload
 """
@@ -9,9 +13,16 @@ import os
 import time
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+from routes.square_payment import create_square_payment, SquarePaymentError
+from routes.afterpay_payment import create_afterpay_payment, AfterpayPaymentError
+from webhooks.square_webhook import handle_square_webhook
+from webhooks.afterpay_webhook import handle_afterpay_webhook
+from utils.transaction_store import read_transactions
 
 # --- Environment ---------------------------------------------------------
 
@@ -29,6 +40,10 @@ if missing:
 
 SQUARE_ACCESS_TOKEN = os.getenv("SQUARE_ACCESS_TOKEN")
 SQUARE_APP_ID = os.getenv("SQUARE_APP_ID")
+
+# Amount thresholds (USD) that decide which payment method(s) to offer.
+CASH_APP_MAX = 50.0    # below this -> Cash App Pay only
+AFTERPAY_MIN = 500.0   # above this -> Afterpay only; in between -> both
 
 # --- Logging -------------------------------------------------------------
 
@@ -90,6 +105,30 @@ class CheckoutRequest(BaseModel):
     itemName: str = Field(..., min_length=1)
 
 
+# --- Payment helpers -----------------------------------------------------
+
+async def _square_option(req: CheckoutRequest) -> dict:
+    """Create a Cash App Pay option. Square's SDK is sync -> run off-loop."""
+    result = await run_in_threadpool(
+        create_square_payment, req.amount, req.email, req.itemName
+    )
+    return {
+        "payment_method": "cash_app_pay",
+        "checkout_url": result["checkout_url"],
+        "payment_id": result["payment_id"],
+    }
+
+
+async def _afterpay_option(req: CheckoutRequest) -> dict:
+    """Create an Afterpay option."""
+    result = await create_afterpay_payment(req.amount, req.email, req.itemName)
+    return {
+        "payment_method": "afterpay",
+        "checkout_url": result["checkout_url"],
+        "payment_id": result["checkout_token"],
+    }
+
+
 # --- Routes --------------------------------------------------------------
 
 @app.get("/health")
@@ -99,19 +138,80 @@ async def health():
 
 @app.post("/api/checkout")
 async def checkout(payload: CheckoutRequest):
+    """Route a checkout to the appropriate payment method(s) by amount.
+
+        amount < $50      -> Cash App Pay only
+        $50 <= amt <= $500 -> both options returned (buyer picks)
+        amount > $500     -> Afterpay only
+    """
     logger.info(
         "Checkout: %s for $%.2f (%s)",
         payload.itemName,
         payload.amount,
         payload.email,
     )
-    # TODO: route to Square / Cash App / Afterpay payment provider.
-    return {
-        "status": "received",
-        "itemName": payload.itemName,
-        "amount": payload.amount,
-        "email": payload.email,
-    }
+
+    try:
+        if payload.amount < CASH_APP_MAX:
+            return await _square_option(payload)
+
+        if payload.amount > AFTERPAY_MIN:
+            return await _afterpay_option(payload)
+
+        # Mid-range: offer both and let the buyer choose.
+        return {
+            "payment_method": "both",
+            "options": [
+                await _square_option(payload),
+                await _afterpay_option(payload),
+            ],
+        }
+    except (SquarePaymentError, AfterpayPaymentError) as exc:
+        logger.error("Checkout failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/api/payments/square")
+async def payments_square(payload: CheckoutRequest):
+    """Create a Cash App Pay (Square) checkout directly."""
+    try:
+        return await run_in_threadpool(
+            create_square_payment, payload.amount, payload.email, payload.itemName
+        )
+    except SquarePaymentError as exc:
+        logger.error("Square payment failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/api/payments/afterpay")
+async def payments_afterpay(payload: CheckoutRequest):
+    """Create an Afterpay checkout directly."""
+    try:
+        return await create_afterpay_payment(
+            payload.amount, payload.email, payload.itemName
+        )
+    except AfterpayPaymentError as exc:
+        logger.error("Afterpay payment failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/webhooks/square")
+async def webhooks_square(request: Request):
+    """Receive Square payment webhooks."""
+    return await handle_square_webhook(request)
+
+
+@app.post("/webhooks/afterpay")
+async def webhooks_afterpay(request: Request):
+    """Receive Afterpay payment webhooks."""
+    return await handle_afterpay_webhook(request)
+
+
+@app.get("/api/transactions")
+async def transactions():
+    """Return every webhook-logged transaction."""
+    records = await read_transactions()
+    return {"count": len(records), "transactions": records}
 
 
 if __name__ == "__main__":
