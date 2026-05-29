@@ -162,6 +162,12 @@
       border: 1px solid #fecdca;
     }
 
+    .banner.success {
+      background: #f0fdf4;
+      color: #15803d;
+      border: 1px solid #bbf7d0;
+    }
+
     /* Payment options */
     .payment-options {
       margin-top: 24px;
@@ -342,6 +348,8 @@
         : "Continue to payment";
     }
 
+    let currentCheckout = null;
+
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       clearErrors();
@@ -367,7 +375,7 @@
           throw new Error(detail);
         }
 
-        await res.json();
+        currentCheckout = await res.json();
         showPaymentOptions(data.amount);
       } catch (err) {
         const message =
@@ -381,12 +389,65 @@
       }
     });
 
-    cashappBtn.addEventListener("click", () => {
-      console.log("Payment method selected: Cash App Pay");
-    });
-    afterpayBtn.addEventListener("click", () => {
-      console.log("Payment method selected: Afterpay");
-    });
+    async function handlePaymentClick(provider) {
+      if (!currentCheckout) return;
+
+      setLoading(true);
+      clearErrors();
+      try {
+        const amount = fields.amount.value;
+        const email = fields.email.value.trim();
+        const itemName = fields.itemName.value.trim();
+
+        const endpoint =
+          provider === "cashapp"
+            ? `${API_BASE_URL}/api/payments/square`
+            : `${API_BASE_URL}/api/payments/afterpay`;
+
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount: parseFloat(amount), email, itemName }),
+        });
+
+        if (!res.ok) {
+          let detail = `Payment creation failed (HTTP ${res.status}).`;
+          try {
+            const body = await res.json();
+            if (body && body.detail) detail = typeof body.detail === "string" ? body.detail : detail;
+          } catch (_) { /* non-JSON response */ }
+          throw new Error(detail);
+        }
+
+        const result = await res.json();
+
+        // For Cash App Pay, redirect to checkout_url
+        if (provider === "cashapp" && result.checkout_url) {
+          window.location.href = result.checkout_url;
+        }
+        // For Afterpay via Square, show the payment status
+        else if (provider === "afterpay") {
+          const statusMsg =
+            result.status === "COMPLETED"
+              ? `✓ Payment approved! ID: ${result.payment_id}`
+              : `Payment ${result.status}. ID: ${result.payment_id}`;
+          const banner = document.createElement("div");
+          banner.className = `banner ${result.status === "COMPLETED" ? "success" : "error"}`;
+          banner.textContent = statusMsg;
+          paymentOptions.parentNode.insertBefore(banner, paymentOptions.nextSibling);
+        } else {
+          throw new Error("Unexpected payment response");
+        }
+      } catch (err) {
+        apiError.textContent = err.message;
+        apiError.classList.remove("hidden");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    cashappBtn.addEventListener("click", () => handlePaymentClick("cashapp"));
+    afterpayBtn.addEventListener("click", () => handlePaymentClick("afterpay"));
   </script>
 </body>
 
