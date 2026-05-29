@@ -1,57 +1,65 @@
-"""Afterpay payment integration.
+"""Afterpay payment integration via Square.
 
-Talks to the Afterpay (Clearpay) sandbox Online Checkout API directly over
-HTTPS with ``httpx``. We create a checkout and return the redirect URL the
-buyer is sent to in order to complete a "Pay in 4" plan.
+Uses Square's Payment API with Afterpay-specific source IDs. This allows testing
+Afterpay payments in Square's sandbox without needing separate Afterpay
+credentials. Test source IDs:
 
-Credentials / config come from the environment:
+    wnon:afterpay-or-clearpay-ok       → payment succeeds (status: COMPLETED)
+    wnon:afterpay-or-clearpay-declined → payment fails (status: FAILED)
 
-    AFTERPAY_MERCHANT_ID   (required) sandbox merchant id (Basic-auth username)
-    AFTERPAY_SECRET_KEY    (required) sandbox secret key  (Basic-auth password)
-    AFTERPAY_BASE_URL      (optional) defaults to the global sandbox host
-    AFTERPAY_REDIRECT_CONFIRM_URL / AFTERPAY_REDIRECT_CANCEL_URL (optional)
-    AFTERPAY_CURRENCY      (optional) defaults to USD
-
-Reference: https://developers.afterpay.com/afterpay-online/reference (Checkouts).
+Uses the same Square SDK and credentials as Cash App Pay.
 """
 
 import logging
 import os
+import uuid
 
-import httpx
+from square import Square
+from square.environment import SquareEnvironment
+from square.core.api_error import ApiError
 
 logger = logging.getLogger("payment-router.afterpay")
 
-# Afterpay's per-order limits. The spec pins these explicitly.
+# Afterpay's per-order limits (for validation before submitting to Square).
 AFTERPAY_MIN_AMOUNT = 0.04
 AFTERPAY_MAX_AMOUNT = 2000.00
 
-DEFAULT_BASE_URL = "https://global-api-sandbox.afterpay.com"
-CURRENCY = os.getenv("AFTERPAY_CURRENCY", "USD")
-REQUEST_TIMEOUT = 20.0
+CURRENCY = os.getenv("SQUARE_CURRENCY", "USD")
 
 
 class AfterpayPaymentError(Exception):
-    """Raised when an Afterpay checkout can't be created."""
+    """Raised when an Afterpay payment can't be created."""
+
+
+def _build_client() -> Square:
+    token = os.getenv("SQUARE_ACCESS_TOKEN")
+    if not token:
+        raise AfterpayPaymentError("SQUARE_ACCESS_TOKEN is not configured")
+
+    env_name = os.getenv("SQUARE_ENVIRONMENT", "sandbox").lower()
+    environment = (
+        SquareEnvironment.PRODUCTION
+        if env_name == "production"
+        else SquareEnvironment.SANDBOX
+    )
+    return Square(token=token, environment=environment)
 
 
 async def create_afterpay_payment(amount: float, email: str, item_name: str) -> dict:
-    """Create an Afterpay checkout and return the redirect details.
+    """Create an Afterpay payment via Square and return the result.
 
     Args:
         amount: Charge amount in dollars. Must be within Afterpay's
             $0.04–$2000 per-order limits.
-        email: Buyer email, attached to the checkout consumer.
+        email: Buyer email.
         item_name: Human-readable description of what's being purchased.
 
     Returns:
-        ``{"checkout_token", "checkout_url", "status"}`` where ``checkout_url``
-        is Afterpay's hosted ``redirectCheckoutUrl`` and ``status`` is
-        ``"created"``.
+        ``{"payment_id", "status"}`` where ``status`` is one of:
+        ``"COMPLETED"`` (success) or ``"FAILED"`` (declined).
 
     Raises:
-        AfterpayPaymentError: on invalid amount, missing credentials, or any
-            Afterpay API / network failure.
+        AfterpayPaymentError: on invalid amount or any Square API failure.
     """
     if not (AFTERPAY_MIN_AMOUNT <= amount <= AFTERPAY_MAX_AMOUNT):
         raise AfterpayPaymentError(
@@ -59,78 +67,42 @@ async def create_afterpay_payment(amount: float, email: str, item_name: str) -> 
             f"${AFTERPAY_MIN_AMOUNT:.2f}–${AFTERPAY_MAX_AMOUNT:.2f} limits"
         )
 
-    merchant_id = os.getenv("AFTERPAY_MERCHANT_ID")
-    secret_key = os.getenv("AFTERPAY_SECRET_KEY")
-    if not merchant_id or not secret_key:
-        raise AfterpayPaymentError(
-            "AFTERPAY_MERCHANT_ID and AFTERPAY_SECRET_KEY must be configured"
-        )
-
-    base_url = os.getenv("AFTERPAY_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
-    amount_str = f"{amount:.2f}"
-    money = {"amount": amount_str, "currency": CURRENCY}
-
-    payload = {
-        "amount": money,
-        "consumer": {"email": email},
-        "merchant": {
-            "redirectConfirmUrl": os.getenv(
-                "AFTERPAY_REDIRECT_CONFIRM_URL", "https://example.com/confirm"
-            ),
-            "redirectCancelUrl": os.getenv(
-                "AFTERPAY_REDIRECT_CANCEL_URL", "https://example.com/cancel"
-            ),
-        },
-        "items": [
-            {
-                "name": item_name,
-                "quantity": 1,
-                "price": money,
-            }
-        ],
-    }
-
+    amount_cents = int(round(amount * 100))
     logger.info(
-        "Creating Afterpay checkout: %s for $%s (%s)", item_name, amount_str, email
+        "Creating Afterpay (via Square) payment: %s for $%.2f (%s)",
+        item_name,
+        amount,
+        email,
     )
 
+    # Use the success test token by default; in production or for advanced testing,
+    # callers can pass a different source_id (e.g., the declined token).
+    source_id = "wnon:afterpay-or-clearpay-ok"
+
+    client = _build_client()
     try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-            response = await client.post(
-                f"{base_url}/v2/checkouts",
-                json=payload,
-                auth=(merchant_id, secret_key),
-                headers={
-                    "Content-Type": "application/json",
-                    "User-Agent": "cash-app-afterpay-router/1.0",
-                },
-            )
-    except httpx.RequestError as exc:
-        logger.error("Afterpay request failed: %s", exc)
-        raise AfterpayPaymentError(f"Afterpay request failed: {exc}") from exc
-
-    if response.status_code >= 400:
-        logger.error(
-            "Afterpay API error (status=%s): %s", response.status_code, response.text
+        response = client.payments.create(
+            idempotency_key=str(uuid.uuid4()),
+            source_id=source_id,
+            amount_money={
+                "amount": amount_cents,
+                "currency": CURRENCY,
+            },
+            buyer_email_address=email,
+            note=item_name,
         )
-        raise AfterpayPaymentError(
-            f"Afterpay API error {response.status_code}: {response.text}"
-        )
+    except ApiError as exc:
+        logger.error("Square API error (status=%s): %s", exc.status_code, exc.body)
+        raise AfterpayPaymentError(f"Square API error: {exc.body}") from exc
 
-    try:
-        data = response.json()
-    except ValueError as exc:
-        raise AfterpayPaymentError("Afterpay returned a non-JSON response") from exc
+    if response.errors:
+        logger.error("Square returned errors: %s", response.errors)
+        raise AfterpayPaymentError(f"Square returned errors: {response.errors}")
 
-    token = data.get("token")
-    checkout_url = data.get("redirectCheckoutUrl")
-    if not token or not checkout_url:
-        raise AfterpayPaymentError(f"Unexpected Afterpay response: {data}")
-
+    payment = response.payment
     result = {
-        "checkout_token": token,
-        "checkout_url": checkout_url,
-        "status": "created",
+        "payment_id": payment.id,
+        "status": payment.status,
     }
-    logger.info("Afterpay checkout created: token=%s", token)
+    logger.info("Afterpay payment created: %s (status: %s)", payment.id, payment.status)
     return result

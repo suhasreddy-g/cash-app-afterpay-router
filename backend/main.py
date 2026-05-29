@@ -120,12 +120,12 @@ async def _square_option(req: CheckoutRequest) -> dict:
 
 
 async def _afterpay_option(req: CheckoutRequest) -> dict:
-    """Create an Afterpay option."""
+    """Create an Afterpay payment via Square."""
     result = await create_afterpay_payment(req.amount, req.email, req.itemName)
     return {
         "payment_method": "afterpay",
-        "checkout_url": result["checkout_url"],
-        "payment_id": result["checkout_token"],
+        "payment_id": result["payment_id"],
+        "status": result["status"],
     }
 
 
